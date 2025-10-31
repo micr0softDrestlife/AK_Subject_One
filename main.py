@@ -5,7 +5,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from gui.main_window import MainWindow
 from gui.tray_icon import TrayIcon
 from core.ocr_engine import OCREngine
-from core.ai_client import OllamaClient
+from core.ai_client import AIClientFactory
 from core.screenshot import ScreenshotManager
 from config.settings import AppConfig
 
@@ -18,10 +18,7 @@ class OCRAIApplication:
         """初始化各个组件"""
         # 初始化核心组件
         self.ocr_engine = OCREngine(self.config.TESSERACT_PATH)# 初始化OCR引擎，传入tesseract路径
-        self.ai_client = OllamaClient(
-            self.config.OLLAMA_BASE_URL,
-            self.config.OLLAMA_MODEL
-        )
+        self.ai_client = self.create_ai_client()
         self.screenshot_manager = ScreenshotManager()
         
         # 初始化GUI, 传入配置以便MainWindow可以根据DEBUG等选项调整行为
@@ -34,6 +31,31 @@ class OCRAIApplication:
         
         # 初始化托盘图标
         self.tray_icon = TrayIcon(self)
+    
+    def create_ai_client(self):
+        """根据配置创建AI客户端"""
+        provider = getattr(self.config, 'AI_PROVIDER', 'ollama')
+        
+        if provider == 'ollama':
+            return AIClientFactory.create_client(
+                provider='ollama',
+                base_url=self.config.OLLAMA_BASE_URL,
+                model=self.config.OLLAMA_MODEL
+            )
+        elif provider == 'openai':
+            return AIClientFactory.create_client(
+                provider='openai',
+                api_key=self.config.OPENAI_API_KEY,
+                base_url=self.config.OPENAI_BASE_URL,
+                model=self.config.OPENAI_MODEL
+            )
+        else:
+            # 默认回退到Ollama
+            return AIClientFactory.create_client(
+                provider='ollama',
+                base_url=self.config.OLLAMA_BASE_URL,
+                model=self.config.OLLAMA_MODEL
+            )
     
     def show(self):
         """显示主窗口"""
