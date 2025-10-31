@@ -1,3 +1,4 @@
+#  Author: micr0softDrestlife
 import pytesseract
 from PIL import Image
 import cv2

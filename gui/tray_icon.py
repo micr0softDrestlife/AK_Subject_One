@@ -1,3 +1,4 @@
+#  Author: micr0softDrestlife
 import pystray
 from PIL import Image, ImageDraw
 import threading

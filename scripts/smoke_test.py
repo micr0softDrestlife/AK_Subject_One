@@ -1,3 +1,4 @@
+#  Author: micr0softDrestlife
 # smoke_test.py - simple import/construct test
 import sys
 sys.path.append(r'E:\tools\ocr_ai_tongsha\python')

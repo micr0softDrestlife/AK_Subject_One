@@ -1,3 +1,4 @@
+#  Author: micr0softDrestlife
 import tkinter as tk
 from tkinter import ttk, scrolledtext
 import threading

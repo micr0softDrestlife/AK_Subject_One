@@ -1,3 +1,4 @@
+#  Author: micr0softDrestlife
 import pyautogui
 import numpy as np
 from PIL import ImageGrab

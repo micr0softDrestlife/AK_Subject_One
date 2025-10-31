@@ -1,3 +1,4 @@
+#  Author: micr0softDrestlife
 import os
 from dataclasses import dataclass
 # dataclass可以自动为类生成特殊方法如 __init__ 和 __repr__，使代码更简洁易读
