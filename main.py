@@ -1,4 +1,3 @@
-#  Author: micr0softDrestlife
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -6,7 +5,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from gui.main_window import MainWindow
 from gui.tray_icon import TrayIcon
 from core.ocr_engine import OCREngine
-from core.ai_client import get_ai_client
+from core.ai_client import OllamaClient
 from core.screenshot import ScreenshotManager
 from config.settings import AppConfig
 
@@ -19,8 +18,10 @@ class OCRAIApplication:
         """初始化各个组件"""
         # 初始化核心组件
         self.ocr_engine = OCREngine(self.config.TESSERACT_PATH)# 初始化OCR引擎，传入tesseract路径
-        # create AI client according to configured provider (ollama/qianwen/...)
-        self.ai_client = get_ai_client(self.config)
+        self.ai_client = OllamaClient(
+            self.config.OLLAMA_BASE_URL,
+            self.config.OLLAMA_MODEL
+        )
         self.screenshot_manager = ScreenshotManager()
         
         # 初始化GUI, 传入配置以便MainWindow可以根据DEBUG等选项调整行为

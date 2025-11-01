@@ -4,6 +4,7 @@ from dataclasses import dataclass
 # dataclass可以自动为类生成特殊方法如 __init__ 和 __repr__，使代码更简洁易读
 @dataclass
 class AppConfig:
+    """应用程序配置类，存储各种配置选项"""
 
     # AI 提供方配置：'ollama'/'qianwen'/'qianwen'/'deepseek'/''。
     ## 可缩写：'qw'/'ds'
@@ -24,7 +25,7 @@ class AppConfig:
 
     # Deepseek 相关配置
     DEEPSEEK_API_URL: str = "https://api.deepseek.com/v1"
-    DEEPSEEK_API_KEY: str = "sk-45840361708d45ee8905e2bcce6eee94"
+    DEEPSEEK_API_KEY: str = ""
     DEEPSEEK_MODEL: str = "deepseek-chat" # 默认使用v3-non-reasoner
 
     # OCR 配置

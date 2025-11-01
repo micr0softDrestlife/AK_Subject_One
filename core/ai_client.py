@@ -17,6 +17,7 @@ from typing import Optional
 import requests
 
 
+
 class BaseAIClient:
     """Minimal interface for AI clients."""
 
@@ -47,7 +48,7 @@ class OllamaClient(BaseAIClient):
 
             if response.status_code != 200:
                 body = response.text
-                return f"API调用失败: {response.status_code} - {body}"
+                return f"Ollama API调用失败: {response.status_code} - {body}"
 
             result = response.json()
 
@@ -180,3 +181,4 @@ def get_ai_client(config) -> BaseAIClient:
     base = getattr(config, 'OLLAMA_BASE_URL', 'http://localhost:11434')
     model = getattr(config, 'OLLAMA_MODEL', None)
     return OllamaClient(base_url=base, model=model)
+
