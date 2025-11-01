@@ -13,6 +13,9 @@ class MainWindow:
         self.config = config
         self.debug = getattr(config, 'DEBUG', False)
 
+        # whether we are waiting for the user to confirm/edit OCR text before sending
+        self.waiting_for_confirm = False
+
         # keep a reference to the preview image to avoid GC
         self._preview_photo = None
 
@@ -76,6 +79,9 @@ class MainWindow:
         # 创建简化模式开关（放入controls_body）
         self.create_simplify_switch(parent=self.controls_body)
 
+        # 创建手动确认开关（开启后OCR结果需在界面内确认/修改再发送）
+        self.create_confirm_switch(parent=self.controls_body)
+
         # 显示选定区域
         self.region_label = tk.Label(self.controls_body, text="未选择区域", wraplength=360)
         self.region_label.pack(pady=5, anchor='w', padx=6)
@@ -110,7 +116,7 @@ class MainWindow:
         if parent is None:
             parent = self.root
         switch_frame = tk.Frame(parent)# 创建一个框架用于放置开关，Frame是tkinter的容器控件，绑定parent
-        switch_frame.pack(pady=6, anchor='w', padx=6)
+        switch_frame.pack(pady=6, anchor='w', padx=6)# pack用于布局，anchor用于对齐方式，padx/pady用于内边距
         
         self.switch_state = False
         self.switch_var = tk.StringVar(value="Off")# StringVar用于动态更新标签文字
@@ -128,7 +134,7 @@ class MainWindow:
         
         # 状态文字
         self.switch_label = tk.Label(switch_frame, textvariable=self.switch_var)# 为框架绑定标签显示开关状态
-        self.switch_label.pack()
+        self.switch_label.pack(side=tk.LEFT, padx=6)# 设置标签位置
         # 保存 switch_frame 以便在折叠时管理
         self._switch_frame = switch_frame
 
@@ -156,6 +162,64 @@ class MainWindow:
         # 保存 frame
         self._simplify_frame = frame
 
+    def create_confirm_switch(self, parent=None):
+        """创建用于控制是否需要手动确认OCR文本再发送给AI的滑动开关。"""
+        if parent is None:
+            parent = self.root
+        frame = tk.Frame(parent)
+        frame.pack(pady=6, anchor='w', padx=6)
+
+        self.confirm_state = False
+        self.confirm_var = tk.StringVar(value="Off")
+
+        # 开关画布
+        self.confirm_canvas = tk.Canvas(frame, width=60, height=30, bg='white')
+        self.confirm_canvas.pack(side=tk.LEFT)
+        # 初始绘制
+        self.draw_confirm()
+        self.confirm_canvas.bind('<Button-1>', self.toggle_confirm)
+
+        # 标签
+        self.confirm_label = tk.Label(frame, textvariable=self.confirm_var)
+        self.confirm_label.pack(side=tk.LEFT, padx=6)
+
+        # 保存 frame
+        self._confirm_frame = frame
+
+    def draw_confirm(self):
+        """绘制手动确认开关状态"""
+        try:
+            self.confirm_canvas.delete('all')
+        except Exception:
+            return
+        
+        self.confirm_var.set('修改模式')
+
+        if self.confirm_state:
+            self.confirm_canvas.create_rectangle(0, 0, 60, 30, fill='green', outline='black')
+            self.confirm_canvas.create_oval(30, 0, 60, 30, fill='white', outline='black')
+            # self.confirm_var.set('On')
+        else:
+            self.confirm_canvas.create_rectangle(0, 0, 60, 30, fill='gray', outline='black')
+            self.confirm_canvas.create_oval(0, 0, 30, 30, fill='white', outline='black')
+            # self.confirm_var.set('Off')
+
+    def toggle_confirm(self, event):
+        """切换手动确认开关"""
+        self.confirm_state = not getattr(self, 'confirm_state', False)
+        self.draw_confirm()
+        # if turning off, hide any OK button and clear waiting flag
+        if not self.confirm_state:
+            try:
+                if hasattr(self, 'ok_btn'):
+                    try:
+                        self.ok_btn.place_forget()
+                    except Exception:
+                        pass
+                self.waiting_for_confirm = False
+            except Exception:
+                pass
+
     def draw_simplify(self):
         """绘制简化模式开关状态"""
         try:
@@ -163,14 +227,16 @@ class MainWindow:
         except Exception:
             return
 
+        self.simplify_var.set('简化模式')
+
         if self.simplify_state:
             self.simplify_canvas.create_rectangle(0, 0, 60, 30, fill='green', outline='black')
             self.simplify_canvas.create_oval(30, 0, 60, 30, fill='white', outline='black')
-            self.simplify_var.set('On')
+            # self.simplify_var.set('On')
         else:
             self.simplify_canvas.create_rectangle(0, 0, 60, 30, fill='gray', outline='black')
             self.simplify_canvas.create_oval(0, 0, 30, 30, fill='white', outline='black')
-            self.simplify_var.set('Off')
+            # self.simplify_var.set('Off')
 
     def toggle_simplify(self, event):
         """切换简化模式开关"""
@@ -180,19 +246,21 @@ class MainWindow:
     def draw_switch(self):
         """绘制开关状态"""
         self.switch_canvas.delete("all")
+
+        self.switch_var.set("开始答题")
         
         if self.switch_state:
             # 开状态 - 绿色
             self.switch_canvas.create_rectangle(0, 0, 60, 30, fill='green', outline='black')# 绘制矩形作为开关背景
             self.switch_canvas.create_oval(30, 0, 60, 30, fill='white', outline='black')# 绘制圆形作为开关按钮
-            self.switch_var.set("On")
+            # self.switch_var.set("On")
             if hasattr(self, 'solve_btn'):
                 self.solve_btn.config(state='normal')# 启用Solve按钮
         else:
             # 关状态 - 灰色
             self.switch_canvas.create_rectangle(0, 0, 60, 30, fill='gray', outline='black')
             self.switch_canvas.create_oval(0, 0, 30, 30, fill='white', outline='black')
-            self.switch_var.set("Off")
+            # self.switch_var.set("Off")
             if hasattr(self, 'solve_btn'):
                 self.solve_btn.config(state='disabled')
     
@@ -290,6 +358,14 @@ class MainWindow:
             height=10
         )
         self.result_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # OK 按钮，用于在手动确认模式下把编辑后的 OCR 文本发送到 AI
+        self.ok_btn = tk.Button(result_frame, text='✔', bg='green', fg='white', command=self._on_confirm_send)
+        # 隐藏，按需 place 到 result_text 的右下角
+        try:
+            self.ok_btn.place_forget()
+        except Exception:
+            pass
     
     def solve(self):
         """执行OCR和AI处理"""
@@ -334,6 +410,25 @@ class MainWindow:
             system_prompt = None
             if getattr(self, 'simplify_state', False):
                 system_prompt = "快速回答下面问题，不需要任何解释"
+            # 如果手动确认模式开启，则将OCR结果放入可编辑的结果框并显示OK按钮，等待用户确认后再发送
+            if getattr(self, 'confirm_state', False):
+                def prepare_for_confirm():
+                    try:
+                        self.result_text.delete('1.0', tk.END)
+                    except Exception:
+                        pass
+                    self.result_text.insert(tk.END, ocr_text)
+                    # place OK 按钮在结果框右下角
+                    try:
+                        self.ok_btn.place(in_=self.result_text, relx=1.0, rely=1.0, x=-10, y=-10, anchor='se')
+                        self.ok_btn.lift()
+                    except Exception:
+                        pass
+                    self.waiting_for_confirm = True
+                    self.status_var.set("等待确认并点击 OK 发送")
+
+                self.root.after(0, prepare_for_confirm)
+                return
 
             ai_response = self.ai_client.generate_response(ocr_text, system_prompt=system_prompt)
 
@@ -347,8 +442,54 @@ class MainWindow:
     
     def display_result(self, ocr_text, ai_response):
         """显示结果"""
-        self.result_text.insert(tk.END, f"AI回复:\n{ai_response}\n{'='*50}\n")
+        self.result_text.insert(tk.END, f"\n\nAI回复:\n{ai_response}\n{'='*50}\n")
         self.result_text.see(tk.END)
+
+    def _on_confirm_send(self):
+        """当用户点击 OK 时，将编辑后的文本发送给 AI 并显示回复"""
+        if not getattr(self, 'waiting_for_confirm', False):
+            return
+
+        prompt = None
+        try:
+            prompt = self.result_text.get('1.0', tk.END).strip()
+        except Exception:
+            prompt = None
+
+        if not prompt:
+            # nothing to send
+            try:
+                self.status_var.set("没有可发送的文本")
+            except Exception:
+                pass
+            return
+
+        # hide OK button and clear waiting flag
+        try:
+            self.ok_btn.place_forget()
+        except Exception:
+            pass
+        self.waiting_for_confirm = False
+
+        # start thread to call AI so UI doesn't block
+        thread = threading.Thread(target=self._confirm_send_thread, args=(prompt,))
+        thread.daemon = True
+        thread.start()
+
+    def _confirm_send_thread(self, prompt):
+        """线程：调用AI并将结果回填界面"""
+        try:
+            self.status_var.set("正在调用AI...")
+            system_prompt = None
+            if getattr(self, 'simplify_state', False):
+                system_prompt = "快速回答下面问题，不需要任何解释"
+
+            ai_response = self.ai_client.generate_response(prompt, system_prompt=system_prompt)
+            self.root.after(0, lambda: self.display_result(prompt, ai_response))
+        except Exception as e:
+            self.root.after(0, lambda: self.result_text.insert(tk.END, f"处理错误: {str(e)}\n"))
+        finally:
+            self.root.after(0, lambda: self.status_var.set("就绪"))
 
     def update_preview(self, image_array):
         """在preview_canvas中显示所选区域的缩略图，并绘制边框以便观察"""
