@@ -25,7 +25,7 @@ class AppConfig:
 
     # Deepseek 相关配置
     DEEPSEEK_API_URL: str = "https://api.deepseek.com/v1"
-    DEEPSEEK_API_KEY: str = "sk-45840361708d45ee8905e2bcce6eee94"
+    DEEPSEEK_API_KEY: str = ""
     DEEPSEEK_MODEL: str = "deepseek-chat" # 默认使用v3-non-reasoner
 
     # OCR 配置
