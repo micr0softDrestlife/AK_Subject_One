@@ -150,7 +150,6 @@ def get_ai_client(config) -> BaseAIClient:
     Expects config to have attributes used in `config/settings.AppConfig`.
     """
     provider = getattr(config, 'AI_PROVIDER', 'ollama')
-    provider = (provider or 'ollama').lower()
 
     if provider == 'ollama':
         base = getattr(config, 'OLLAMA_BASE_URL', 'http://localhost:11434')
