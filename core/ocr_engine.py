@@ -10,90 +10,51 @@ class OCREngine:
         if tesseract_path:
             pytesseract.pytesseract.tesseract_cmd = tesseract_path
 
-    def preprocess_image(self, image):
-        """图像预处理提高OCR准确率
+    def _to_pil(self, image_array):
+        """Convert numpy array or PIL Image to a PIL Image instance without altering pixels."""
+        if isinstance(image_array, Image.Image):
+            return image_array
 
-        Expects image as a NumPy array in RGB order (H, W, C) or a single-channel grayscale.
-        """
-        # Ensure numpy array
-        img = np.asarray(image)
+        arr = np.asarray(image_array)
+        # If it's a 3-channel image assume it's already RGB
+        if arr.ndim == 3 and arr.shape[2] == 3:
+            arr = arr.astype('uint8')
+            return Image.fromarray(arr)
+        # single channel or other
+        return Image.fromarray(arr)
 
-        # If color image in RGB, convert to gray
-        if img.ndim == 3 and img.shape[2] == 3:
-            # If image came from OpenCV it may be BGR; however we try to detect common cases.
-            # Convert to grayscale
-            gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-        else:
-            gray = img
-        # 如果分辨率较小，适当放大以提高识别率（针对长中文，放大有助于LSTM模型）
-        h, w = gray.shape[:2]
-        target_w = 1200
-        if w < target_w:
-            scale = target_w / float(w)
-            new_w = int(w * scale)
-            new_h = int(h * scale)
-            gray = cv2.resize(gray, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
-
-        # 降噪（保留边缘）
-        denoised = cv2.bilateralFilter(gray, 9, 75, 75)
-
-        # 对比度受限自适应直方图均衡（CLAHE）提高局部对比度
+    def extract_text(self, image_array):
+        """直接从图像中提取文字，不做预处理以最大程度保留原始信息。"""
         try:
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-            denoised = clahe.apply(denoised)
-        except Exception:
-            pass
-
-        # 自适应阈值（对非均匀照明更稳健）
-        try:
-            binary = cv2.adaptiveThreshold(
-                denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 15, 9
-            )
-        except Exception:
-            _, binary = cv2.threshold(denoised, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-        # 小的形态学操作去除噪点
-        kernel = np.ones((2, 2), np.uint8)
-        opened = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
-
-        return opened
-
-    def extract_text(self, image_array, preprocess=True):
-        """从图像中提取文字
-
-        Accepts a NumPy image (RGB) or a PIL Image. Returns stripped text.
-        """
-        try:
-            # If PIL Image, convert to numpy array
-            if isinstance(image_array, Image.Image):
-                arr = np.array(image_array)
-            else:
-                arr = np.asarray(image_array)
-
-            # If image is in BGR (common from cv2), convert to RGB before PIL
-            if arr.ndim == 3 and arr.shape[2] == 3:
-                # Heuristic: many cv2 images are uint8; assume RGB order is desired by PIL. If colors look inverted, swap.
-                # Convert array to uint8 explicitly
-                arr = arr.astype('uint8')
-                pil_image = Image.fromarray(arr)
-            else:
-                pil_image = Image.fromarray(arr)
-
-            # Optionally preprocess via OpenCV (PIL -> numpy)
-            if preprocess:
-                proc = np.array(pil_image)
-                proc = self.preprocess_image(proc)
-                pil_image = Image.fromarray(proc)
-
-            # OCR识别，针对长中文文本使用合适的psm/oem
+            pil_image = self._to_pil(image_array)
             tesseract_config = '--oem 1 --psm 6'
             text = pytesseract.image_to_string(
                 pil_image,
                 lang='chi_sim+eng',
                 config=tesseract_config
             )
-
             return text.strip()
         except Exception as e:
             print(f"OCR识别错误: {e}")
+            return ""
+
+    def extract_text_split(self, image_array):
+        """将图像按竖直中线分割，先对左半部分OCR，再对右半部分OCR，按左右顺序合并返回结果。"""
+        try:
+            pil = self._to_pil(image_array)
+            w, h = pil.size
+            mid = w // 2
+
+            left = pil.crop((0, 0, mid, h))
+            right = pil.crop((mid, 0, w, h))
+
+            left_text = self.extract_text(left)
+            right_text = self.extract_text(right)
+
+            # 合并左右识别结果，保留空格或换行以帮助后续处理
+            if left_text and right_text:
+                return left_text + '\n' + right_text
+            return (left_text or '') + (('\n' + right_text) if right_text else '')
+        except Exception as e:
+            print(f"分屏OCR错误: {e}")
             return ""

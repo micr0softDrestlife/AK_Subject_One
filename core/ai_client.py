@@ -97,10 +97,12 @@ class OpenAIClient(BaseAIClient):
         base = self.base_url or 'https://api.openai.com/v1'
         b = base.rstrip('/')
         # If base already contains '/v1' use base+'/chat/completions', otherwise use base+'/v1/chat/completions'
+        
         if b.endswith('/v1') or '/v1/' in b or b.endswith('/v1'):
             url = f"{b}/chat/completions"
         else:
             url = f"{b}/v1/chat/completions"
+        
 
         headers = {
             'Authorization': f'Bearer {self.api_key}',
@@ -175,6 +177,12 @@ def get_ai_client(config) -> BaseAIClient:
         base = getattr(config, 'DEEPSEEK_API_URL', None)
         model = getattr(config, 'DEEPSEEK_MODEL', None)
         return OpenAIClient(api_key=key, base_url=base, model=model)
+    
+    if provider in ('other','ot'):
+        key = getattr(config,'OTHER_API_KEY',None)
+        base = getattr(config,'OTHER_API_URL',None)
+        model = getattr(config,'OTHER_MODEL',None)
+        return OpenAIClient(api_key=key,base_url=base,model=model)
 
     # Unknown provider: fallback to OllamaClient for compatibility
     base = getattr(config, 'OLLAMA_BASE_URL', 'http://localhost:11434')

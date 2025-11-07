@@ -6,10 +6,10 @@ from dataclasses import dataclass
 class AppConfig:
     """应用程序配置类，存储各种配置选项"""
 
-    # AI 提供方配置：'ollama'/'qianwen'/'qianwen'/'deepseek'/''。
-    ## 可缩写：'qw'/'ds'
+    # AI 提供方配置：'ollama'/'qianwen'/'qianwen'/'deepseek'/'other'。
+    ## 可缩写：'qw'/'ds'/'ot'
     # 默认使用 Ollama 本地服务
-    AI_PROVIDER: str = 'deepseek'
+    AI_PROVIDER: str = 'ds'
     
     # Ollama 配置
     ## 默认模型供应商与模型
@@ -27,6 +27,11 @@ class AppConfig:
     DEEPSEEK_API_URL: str = "https://api.deepseek.com/v1"
     DEEPSEEK_API_KEY: str = ""
     DEEPSEEK_MODEL: str = "deepseek-chat" # 默认使用v3-non-reasoner
+
+    # 自定义相关配置
+    OTHER_API_URL: str = ""
+    OTHER_API_KEY: str = ""
+    OTHER_MODEL: str = ""
 
     # OCR 配置
     # 将相对路径解析为项目内的绝对路径，避免不同工作目录导致找不到可执行文件

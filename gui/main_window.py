@@ -79,6 +79,9 @@ class MainWindow:
         # 创建简化模式开关（放入controls_body）
         self.create_simplify_switch(parent=self.controls_body)
 
+        # 创建左右分屏开关（放入controls_body）
+        self.create_split_switch(parent=self.controls_body)
+
         # 创建手动确认开关（开启后OCR结果需在界面内确认/修改再发送）
         self.create_confirm_switch(parent=self.controls_body)
 
@@ -185,6 +188,51 @@ class MainWindow:
 
         # 保存 frame
         self._confirm_frame = frame
+
+    def create_split_switch(self, parent=None):
+        """创建用于控制是否按左右分屏分别识别的滑动开关。开启时会对左右两半分别OCR并合并结果。"""
+        if parent is None:
+            parent = self.root
+        frame = tk.Frame(parent)
+        frame.pack(pady=6, anchor='w', padx=6)
+
+        self.split_state = False
+        self.split_var = tk.StringVar(value="Off")
+
+        # 开关画布
+        self.split_canvas = tk.Canvas(frame, width=60, height=30, bg='white')
+        self.split_canvas.pack(side=tk.LEFT)
+        # 初始绘制
+        self.draw_split()
+        self.split_canvas.bind('<Button-1>', self.toggle_split)
+
+        # 标签
+        self.split_label = tk.Label(frame, textvariable=self.split_var)
+        self.split_label.pack(side=tk.LEFT, padx=6)
+
+        # 保存 frame
+        self._split_frame = frame
+
+    def draw_split(self):
+        """绘制左右分屏开关状态"""
+        try:
+            self.split_canvas.delete('all')
+        except Exception:
+            return
+
+        self.split_var.set('左右分屏')
+
+        if self.split_state:
+            self.split_canvas.create_rectangle(0, 0, 60, 30, fill='green', outline='black')
+            self.split_canvas.create_oval(30, 0, 60, 30, fill='white', outline='black')
+        else:
+            self.split_canvas.create_rectangle(0, 0, 60, 30, fill='gray', outline='black')
+            self.split_canvas.create_oval(0, 0, 30, 30, fill='white', outline='black')
+
+    def toggle_split(self, event):
+        """切换左右分屏开关"""
+        self.split_state = not getattr(self, 'split_state', False)
+        self.draw_split()
 
     def draw_confirm(self):
         """绘制手动确认开关状态"""
@@ -393,8 +441,15 @@ class MainWindow:
                 self.result_text.insert(tk.END, "错误: 未选择区域\n")
                 return
             
-            # OCR识别
-            ocr_text = self.ocr_engine.extract_text(screenshot)
+            # OCR识别（支持左右分屏模式）
+            if getattr(self, 'split_state', False):
+                try:
+                    ocr_text = self.ocr_engine.extract_text_split(screenshot)
+                except Exception:
+                    # fallback to normal extraction on error
+                    ocr_text = self.ocr_engine.extract_text(screenshot)
+            else:
+                ocr_text = self.ocr_engine.extract_text(screenshot)
             if not ocr_text:
                 self.root.after(0, lambda: self.result_text.insert(tk.END, "OCR未识别到文字\n"))
                 return
@@ -507,6 +562,14 @@ class MainWindow:
             self.preview_canvas.create_image(canvas_w//2, canvas_h//2, image=self._preview_photo)
             # 绘制红色边框以示意
             self.preview_canvas.create_rectangle(2, 2, canvas_w-2, canvas_h-2, outline='red', width=2)
+            # 若开启左右分屏，绘制与边框相同样式的中线
+            try:
+                if getattr(self, 'split_state', False):
+                    mid_x = canvas_w // 2
+                    # draw center vertical line matching border color/width
+                    self.preview_canvas.create_line(mid_x, 2, mid_x, canvas_h-2, fill='red', width=2)
+            except Exception:
+                pass
         except Exception as e:
             print('update_preview 错误:', e)
     
@@ -556,6 +619,14 @@ class MainWindow:
         canvas.pack(fill=tk.BOTH, expand=True)
         # Draw a red border inside the overlay
         canvas.create_rectangle(1, 1, w-2, h-2, outline='red', width=3)
+
+        # If split mode is active, draw a center vertical line matching the border
+        try:
+            if getattr(self, 'split_state', False):
+                cx = w // 2
+                canvas.create_line(cx, 1, cx, h-1, fill='red', width=3)
+        except Exception:
+            pass
 
         # keep reference
         self.region_overlay = overlay
