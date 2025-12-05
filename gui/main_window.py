@@ -85,6 +85,9 @@ class MainWindow:
         # 创建手动确认开关（开启后OCR结果需在界面内确认/修改再发送）
         self.create_confirm_switch(parent=self.controls_body)
 
+        # 创建OCR速度滑块
+        self.create_speed_slider(parent=self.controls_body)
+
         # 显示选定区域
         self.region_label = tk.Label(self.controls_body, text="未选择区域", wraplength=360)
         self.region_label.pack(pady=5, anchor='w', padx=6)
@@ -267,6 +270,71 @@ class MainWindow:
                 self.waiting_for_confirm = False
             except Exception:
                 pass
+
+    def create_speed_slider(self, parent=None):
+        """创建OCR速度滑块，用于在速度和精度之间切换"""
+        if parent is None:
+            parent = self.root
+        
+        frame = tk.Frame(parent)
+        frame.pack(pady=6, anchor='w', padx=6, fill=tk.X)
+        
+        # 标签
+        tk.Label(frame, text="OCR速度:").pack(side=tk.LEFT)
+        
+        # 速度模式映射: 滑块值 -> 模式名
+        self._speed_modes_map = {0: 'fast', 1: 'balanced', 2: 'accurate'}
+        self._speed_labels = {0: '⚡极速', 1: '⚖️平衡', 2: '🎯精确'}
+        
+        # 当前速度值（记录上一次的值，避免重复触发）
+        self.speed_var = tk.IntVar(value=0)  # 默认极速模式
+        self._last_speed_value = 0
+        
+        # 速度显示标签
+        self.speed_display = tk.Label(frame, text=self._speed_labels[0], width=8)
+        self.speed_display.pack(side=tk.RIGHT, padx=(6, 0))
+        
+        # 滑块
+        self.speed_slider = ttk.Scale(
+            frame,
+            from_=0,
+            to=2,
+            orient=tk.HORIZONTAL,
+            variable=self.speed_var,
+            command=self._on_speed_change,
+            length=150
+        )
+        self.speed_slider.pack(side=tk.LEFT, padx=6, fill=tk.X, expand=True)
+        
+        # 保存frame
+        self._speed_frame = frame
+    
+    def _on_speed_change(self, value):
+        """速度滑块值改变时的回调"""
+        # 将浮点值四舍五入为整数
+        int_value = round(float(value))
+        
+        # 只有当值真正改变时才处理
+        if int_value == self._last_speed_value:
+            return
+        
+        self._last_speed_value = int_value
+        
+        # 更新滑块位置（吸附到整数位置）
+        self.speed_var.set(int_value)
+        
+        # 更新显示标签
+        self.speed_display.config(text=self._speed_labels.get(int_value, ''))
+        
+        # 更新OCR引擎的速度模式
+        mode = self._speed_modes_map.get(int_value, 'fast')
+        try:
+            self.ocr_engine.set_speed_mode(mode)
+            # 更新状态栏
+            mode_info = self.ocr_engine.get_speed_modes().get(mode, {})
+            self.status_var.set(f"OCR模式: {mode_info.get('name', mode)} - {mode_info.get('description', '')}")
+        except Exception as e:
+            print(f"切换OCR速度模式失败: {e}")
 
     def draw_simplify(self):
         """绘制简化模式开关状态"""

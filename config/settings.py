@@ -25,7 +25,7 @@ class AppConfig:
 
     # Deepseek 相关配置
     DEEPSEEK_API_URL: str = "https://api.deepseek.com/v1"
-    DEEPSEEK_API_KEY: str = ""
+    DEEPSEEK_API_KEY: str = "sk-4f1acb71a56f4f0e9e3bd213f85e2f38"
     DEEPSEEK_MODEL: str = "deepseek-chat" # 默认使用v3-non-reasoner
 
     # 自定义相关配置
@@ -33,11 +33,23 @@ class AppConfig:
     OTHER_API_KEY: str = ""
     OTHER_MODEL: str = ""
 
-    # OCR 配置
-    # 将相对路径解析为项目内的绝对路径，避免不同工作目录导致找不到可执行文件
-    TESSERACT_PATH: str = os.path.abspath(# abspath打印当前工作目录中文件的绝对路径
-        os.path.join(os.path.dirname(__file__), '..', 'te_exe', 'tesseract.exe')
-    )
+    # OCR 配置 - PaddleOCR
+    # PaddleOCR 模型会自动下载到 ~/.paddleocr/ 目录
+    # 首次运行会自动下载模型（约100MB），之后支持离线使用
+    # 如需自定义模型目录，可设置此路径（为None时使用默认目录）
+    PADDLEOCR_MODEL_DIR: str = None  # 例如: os.path.join(os.path.dirname(__file__), '..', 'ocr_models')
+    
+    # 是否使用GPU加速（需要安装paddlepaddle-gpu）
+    PADDLEOCR_USE_GPU: bool = False
+    
+    # OCR语言设置：'ch'=中英文混合, 'en'=纯英文, 'ch_sim'=简体中文
+    PADDLEOCR_LANG: str = 'ch'
+    
+    # OCR速度模式：'fast'=极速, 'balanced'=平衡, 'accurate'=精确
+    # fast: 约0.5秒，使用PP-OCRv4 mobile模型
+    # balanced: 约1秒，使用PP-OCRv4 mobile模型（较大检测尺寸）
+    # accurate: 约8秒，使用PP-OCRv5 server模型（最高精度）
+    PADDLEOCR_SPEED_MODE: str = 'fast'
 
     # 界面配置
     WINDOW_WIDTH: int = 400

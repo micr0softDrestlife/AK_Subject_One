@@ -1,3 +1,4 @@
+#  Author: micr0softDrestlife
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -17,7 +18,12 @@ class OCRAIApplication:
     def setup_components(self):
         """初始化各个组件"""
         # 初始化核心组件
-        self.ocr_engine = OCREngine(self.config.TESSERACT_PATH)# 初始化OCR引擎，传入tesseract路径
+        # 初始化OCR引擎 - 使用PaddleOCR
+        self.ocr_engine = OCREngine(
+            model_dir=self.config.PADDLEOCR_MODEL_DIR,
+            lang=self.config.PADDLEOCR_LANG,
+            speed_mode=self.config.PADDLEOCR_SPEED_MODE
+        )
 
         self.ai_client = get_ai_client(
             self.config

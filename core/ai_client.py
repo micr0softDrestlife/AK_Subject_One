@@ -31,7 +31,7 @@ class OllamaClient(BaseAIClient):
         self.model = model
 
     def generate_response(self, prompt, system_prompt=None):
-        """调用Ollama生成回复。保持原来宽容的解析逻辑以处理不同 Ollama 版本的返回形状。"""
+        # 调用Ollama生成回复。
         try:
             url = f"{self.base_url}/api/generate"
 
@@ -93,7 +93,7 @@ class OpenAIClient(BaseAIClient):
 
     def generate_response(self, prompt, system_prompt=None):
         if not self.api_key:
-            return "OpenAI API key 未配置"
+            return "API key 未配置"
         base = self.base_url or 'https://api.openai.com/v1'
         b = base.rstrip('/')
         # If base already contains '/v1' use base+'/chat/completions', otherwise use base+'/v1/chat/completions'
@@ -124,7 +124,7 @@ class OpenAIClient(BaseAIClient):
         try:
             resp = requests.post(url, headers=headers, json=payload, timeout=120)
             if resp.status_code != 200:
-                return f"OpenAI API 调用失败: {resp.status_code} - {resp.text}"
+                return f"API 调用失败: {resp.status_code} - {resp.text}"
 
             data = resp.json()
             if isinstance(data, dict):
@@ -141,9 +141,9 @@ class OpenAIClient(BaseAIClient):
             return resp.text
 
         except requests.exceptions.ConnectionError:
-            return "无法连接到 OpenAI 服务"
+            return "无法连接到 AI 服务"
         except Exception as e:
-            return f"OpenAI 调用错误: {str(e)}"
+            return f"AI 调用错误: {str(e)}"
 
 
 def get_ai_client(config) -> BaseAIClient:
@@ -171,8 +171,6 @@ def get_ai_client(config) -> BaseAIClient:
         return OpenAIClient(api_key=key, base_url=base, model=model)
 
     if provider in ('deepseek', 'ds'):
-        # Deepseek is OpenAI-compatible; prefer using the OpenAIClient wrapper so
-        # we call the /v1/chat/completions endpoint with the provided base URL.
         key = getattr(config, 'DEEPSEEK_API_KEY', None)
         base = getattr(config, 'DEEPSEEK_API_URL', None)
         model = getattr(config, 'DEEPSEEK_MODEL', None)
