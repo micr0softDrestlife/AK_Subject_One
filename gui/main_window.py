@@ -1,495 +1,428 @@
 #  Author: micr0softDrestlife
-import tkinter as tk
-from tkinter import ttk, scrolledtext
+import os
 import threading
-from PIL import Image, ImageTk
-import io
+import tkinter as tk
+from tkinter import scrolledtext
 
-class MainWindow:
+from gui.hotkey_utils import build_hotkey_map, normalize_hotkey
+from gui.ocr_text_pipeline import (
+    build_ai_prompt_from_ocr,
+    load_ocr_text,
+    persist_ocr_text,
+    prepare_ocr_cache_dir,
+)
+from gui.panel_controls import PanelControlsMixin
+from gui.region_tools import (
+    NoFocusRegionPicker,
+    create_region_overlay,
+    destroy_region_overlay,
+)
+from gui.window_events import WindowEventsMixin
+from gui.window_layout import WindowLayoutMixin
+
+try:
+    from pynput import keyboard as pynput_keyboard
+except Exception:
+    pynput_keyboard = None
+try:
+    from pynput import mouse as pynput_mouse
+except Exception:
+    pynput_mouse = None
+
+try:
+    from core.voice import VoiceOutput
+except Exception:
+    VoiceOutput = None
+
+
+class MainWindow(WindowEventsMixin, WindowLayoutMixin, PanelControlsMixin):
     def __init__(self, ocr_engine, ai_client, screenshot_manager, config):
         self.ocr_engine = ocr_engine
         self.ai_client = ai_client
         self.screenshot_manager = screenshot_manager
         self.config = config
-        self.debug = getattr(config, 'DEBUG', False)
+        self.debug = getattr(config, "DEBUG", False)
+        self.hotkey = getattr(
+            config, "HOTKEY_SOLVE", getattr(config, "SCREENSHOT_HOTKEY", "shift+l")
+        )
+        self.simplify_hotkey = getattr(config, "HOTKEY_TOGGLE_SIMPLIFY", "shift+k")
+        self.border_cycle_hotkey = getattr(
+            config, "HOTKEY_CYCLE_BORDER_STYLE", "shift+j"
+        )
+        self.reselect_hotkey = getattr(config, "HOTKEY_RESELECT_REGION", "shift+h")
+        self.toggle_reselect_mode_hotkey = getattr(
+            config, "HOTKEY_TOGGLE_RESELECT_MODE", "ctrl+shift+h"
+        )
+        # 兼容旧习惯：即便默认热键改为 Shift+H，仍允许 Ctrl+H 触发重选。
+        self.legacy_reselect_hotkey = "ctrl+h"
+        self.reselect_nofocus = bool(
+            getattr(config, "HOTKEY_RESELECT_REGION_NOFOCUS", True)
+        )
+        self.voice_enabled = bool(getattr(config, "VOICE", False))
 
         # whether we are waiting for the user to confirm/edit OCR text before sending
         self.waiting_for_confirm = False
+        self.processing = False
 
         # keep a reference to the preview image to avoid GC
         self._preview_photo = None
+        self._hotkey_listener = None
+        self._closed = False
+        self._last_ocr_text_path = None
+        self._region_picker = None
+        self._border_styles = [
+            {"name": "红色", "color": "red"},
+            {"name": "透明", "color": ""},
+            {"name": "黑色", "color": "black"},
+            {"name": "浅白色", "color": "#f5f5f5"},
+        ]
+        self._border_style_index = 0
+        self._border_line_width = 1
+        self.region_overlay = None
+        self.voice_output = (
+            VoiceOutput(enabled=self.voice_enabled) if VoiceOutput else None
+        )
+        cache_dir = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "artifacts", "ocr_cache")
+        )
+        self._ocr_cache_dir = prepare_ocr_cache_dir(cache_dir)
 
         self.create_window()
-    
+        self._setup_global_hotkey()
+
     def create_window(self):
         """创建主窗口"""
-        self.root = tk.Tk()# 创建主窗口，Tk是tkinter的主窗口类
-        self.root.title("OCR AI Tool")
-        self.root.geometry("400x500")# 设置窗口大小
-        self.root.attributes('-alpha', 0.9)# 设置窗口透明度
+        self._build_window_layout()
+        self._bind_window_events()
 
-        # 窗口始终置顶（除非最小化或窗口被关闭）
+    def _normalize_hotkey(self, hotkey):
+        """将配置热键转为 pynput 可识别格式。"""
+        return normalize_hotkey(hotkey, default="<shift>+l")
+
+    def _ready_status(self):
+        return (
+            f"就绪 | 解题快捷键: {str(self.hotkey).upper()} | "
+            f"简化切换: {str(self.simplify_hotkey).upper()} | "
+            f"边框切换: {str(self.border_cycle_hotkey).upper()} | "
+            f"重选区域: {str(self.reselect_hotkey).upper()} | "
+            f"重选模式: {str(self.toggle_reselect_mode_hotkey).upper()}"
+        )
+
+    def _set_local_hint(self, message):
+        """更新仅本地状态提示条（不创建任何额外顶层窗口）。"""
         try:
-            self.root.attributes('-topmost', True)
+            if hasattr(self, "local_hint_var"):
+                self.local_hint_var.set(f"本地提示: {message}")
         except Exception:
             pass
-        # 监听最小化/还原事件，最小化时取消置顶，恢复时再次置顶
-        self.root.bind('<Unmap>', self._on_unmap)
-        self.root.bind('<Map>', self._on_map)
-        
-        
-        
-        # 折叠式控件面板（可以折叠以节省空间），包含区域选择、开关、预览等
-        self.controls_frame = tk.Frame(self.root)
 
-        header = tk.Frame(self.controls_frame)
-        header.pack(fill=tk.X)
-        self._controls_expanded = True
-        self._toggle_btn = tk.Button(header, text='−', width=2, command=self._toggle_controls)
-        self._toggle_btn.pack(side=tk.LEFT, padx=(5, 2), pady=5)
-        tk.Label(header, text='工具面板').pack(side=tk.LEFT, padx=4)
+    def _current_border_style(self):
+        return self._border_styles[self._border_style_index % len(self._border_styles)]
 
-        # 折叠面板的主体
-        self.controls_body = tk.Frame(self.controls_frame)
-        self.controls_body.pack(fill=tk.X)
+    def _persist_ocr_text(self, ocr_text):
+        """将 OCR 原文落盘，便于界面展示和 AI 提示词分流。"""
+        path = persist_ocr_text(self._ocr_cache_dir, ocr_text)
+        self._last_ocr_text_path = path
+        return path
 
-        # 创建区域选择按钮（放入controls_body），并在右侧增加一个“关闭”按钮以移除选区边框
-        region_frame = tk.Frame(self.controls_body)
-        region_frame.pack(pady=6, anchor='w', padx=6)
+    def _load_ocr_text(self, path, fallback=""):
+        """读取 OCR 临时文件文本，失败时回退到 fallback。"""
+        return load_ocr_text(path, fallback=fallback)
 
-        self.region_btn = ttk.Button(
-            region_frame,
-            text="选择识别区域",
-            command=self.select_region
-        )
-        self.region_btn.pack(side=tk.LEFT)
+    def _build_ai_prompt_from_ocr(self, ocr_text):
+        """将 OCR 文本规范化为 AI 提示词，减少无效换行。"""
+        return build_ai_prompt_from_ocr(ocr_text)
 
-        # 关闭选区边框的按钮，初始禁用
-        self.close_region_btn = ttk.Button(
-            region_frame,
-            text="关闭",
-            command=self.close_region,
-            state='disabled'
-        )
-        self.close_region_btn.pack(side=tk.LEFT, padx=(6, 0))
-
-        # 创建滑动开关（放入controls_body）
-        self.create_switch(parent=self.controls_body)
-
-        # 创建简化模式开关（放入controls_body）
-        self.create_simplify_switch(parent=self.controls_body)
-
-        # 创建左右分屏开关（放入controls_body）
-        self.create_split_switch(parent=self.controls_body)
-
-        # 创建手动确认开关（开启后OCR结果需在界面内确认/修改再发送）
-        self.create_confirm_switch(parent=self.controls_body)
-
-        # 创建OCR速度滑块
-        self.create_speed_slider(parent=self.controls_body)
-
-        # 显示选定区域
-        self.region_label = tk.Label(self.controls_body, text="未选择区域", wraplength=360)
-        self.region_label.pack(pady=5, anchor='w', padx=6)
-
-        # 区域预览（用于持久显示所选区域）
-        preview_frame = tk.LabelFrame(self.controls_body, text="选定区域预览")
-        preview_frame.pack(pady=5, padx=6, fill=tk.X)
-        self.preview_canvas = tk.Canvas(preview_frame, width=320, height=120, bg='black')
-        self.preview_canvas.pack(padx=5, pady=5)
-
-        # 结果显示区域
-        self.create_result_area()
-
-        self.controls_frame.pack(fill=tk.X, pady=(5, 0))
-
-        # 创建Solve按钮（保持可见，不折叠）
-        self.solve_btn = ttk.Button(
-            self.root,
-            text="Solve",
-            command=self.solve,
-            state='disabled'
-        )
-        self.solve_btn.pack(pady=10)
-        
-        # 状态栏
-        self.status_var = tk.StringVar(value="就绪")
-        status_bar = tk.Label(self.root, textvariable=self.status_var, relief=tk.SUNKEN)
-        status_bar.pack(side=tk.BOTTOM, fill=tk.X)
-    
-    def create_switch(self, parent=None):
-        """创建滑动开关。可指定父容器 parent（默认为 root）。"""
-        if parent is None:
-            parent = self.root
-        switch_frame = tk.Frame(parent)# 创建一个框架用于放置开关，Frame是tkinter的容器控件，绑定parent
-        switch_frame.pack(pady=6, anchor='w', padx=6)# pack用于布局，anchor用于对齐方式，padx/pady用于内边距
-        
-        self.switch_state = False
-        self.switch_var = tk.StringVar(value="Off")# StringVar用于动态更新标签文字
-        
-        # 开关背景
-        self.switch_canvas = tk.Canvas(switch_frame, width=60, height=30, bg='white')# Canvas用于绘制图形
-        self.switch_canvas.pack()
-        
-        # 绘制初始状态（Off）
-        self.draw_switch()
-        
-        # 绑定点击事件
-        self.switch_canvas.bind('<Button-1>', self.toggle_switch)
-        # Button-1表示鼠标左键点击事件，绑定toggle_switch方法，bind用于事件绑定，绑定那块区域
-        
-        # 状态文字
-        self.switch_label = tk.Label(switch_frame, textvariable=self.switch_var)# 为框架绑定标签显示开关状态
-        self.switch_label.pack(side=tk.LEFT, padx=6)# 设置标签位置
-        # 保存 switch_frame 以便在折叠时管理
-        self._switch_frame = switch_frame
-
-    def create_simplify_switch(self, parent=None):
-        """创建用于控制AI简化模式的滑动开关。开启时会在调用AI时附加系统提示。"""
-        if parent is None:
-            parent = self.root
-        frame = tk.Frame(parent)
-        frame.pack(pady=6, anchor='w', padx=6)
-
-        self.simplify_state = False
-        self.simplify_var = tk.StringVar(value="Off")
-
-        # 开关画布
-        self.simplify_canvas = tk.Canvas(frame, width=60, height=30, bg='white')
-        self.simplify_canvas.pack(side=tk.LEFT)
-        # 初始绘制
-        self.draw_simplify()
-        self.simplify_canvas.bind('<Button-1>', self.toggle_simplify)
-
-        # 标签
-        self.simplify_label = tk.Label(frame, textvariable=self.simplify_var)
-        self.simplify_label.pack(side=tk.LEFT, padx=6)
-
-        # 保存 frame
-        self._simplify_frame = frame
-
-    def create_confirm_switch(self, parent=None):
-        """创建用于控制是否需要手动确认OCR文本再发送给AI的滑动开关。"""
-        if parent is None:
-            parent = self.root
-        frame = tk.Frame(parent)
-        frame.pack(pady=6, anchor='w', padx=6)
-
-        self.confirm_state = False
-        self.confirm_var = tk.StringVar(value="Off")
-
-        # 开关画布
-        self.confirm_canvas = tk.Canvas(frame, width=60, height=30, bg='white')
-        self.confirm_canvas.pack(side=tk.LEFT)
-        # 初始绘制
-        self.draw_confirm()
-        self.confirm_canvas.bind('<Button-1>', self.toggle_confirm)
-
-        # 标签
-        self.confirm_label = tk.Label(frame, textvariable=self.confirm_var)
-        self.confirm_label.pack(side=tk.LEFT, padx=6)
-
-        # 保存 frame
-        self._confirm_frame = frame
-
-    def create_split_switch(self, parent=None):
-        """创建用于控制是否按左右分屏分别识别的滑动开关。开启时会对左右两半分别OCR并合并结果。"""
-        if parent is None:
-            parent = self.root
-        frame = tk.Frame(parent)
-        frame.pack(pady=6, anchor='w', padx=6)
-
-        self.split_state = False
-        self.split_var = tk.StringVar(value="Off")
-
-        # 开关画布
-        self.split_canvas = tk.Canvas(frame, width=60, height=30, bg='white')
-        self.split_canvas.pack(side=tk.LEFT)
-        # 初始绘制
-        self.draw_split()
-        self.split_canvas.bind('<Button-1>', self.toggle_split)
-
-        # 标签
-        self.split_label = tk.Label(frame, textvariable=self.split_var)
-        self.split_label.pack(side=tk.LEFT, padx=6)
-
-        # 保存 frame
-        self._split_frame = frame
-
-    def draw_split(self):
-        """绘制左右分屏开关状态"""
-        try:
-            self.split_canvas.delete('all')
-        except Exception:
+    def _setup_global_hotkey(self):
+        """注册全局快捷键，支持无焦点触发答题流程。"""
+        if pynput_keyboard is None:
+            print("全局快捷键不可用: 未安装 pynput")
             return
 
-        self.split_var.set('左右分屏')
-
-        if self.split_state:
-            self.split_canvas.create_rectangle(0, 0, 60, 30, fill='green', outline='black')
-            self.split_canvas.create_oval(30, 0, 60, 30, fill='white', outline='black')
+        hotkey_map = build_hotkey_map(
+            solve_hotkey=self.hotkey,
+            simplify_hotkey=self.simplify_hotkey,
+            border_hotkey=self.border_cycle_hotkey,
+            reselect_hotkey=self.reselect_hotkey,
+            legacy_reselect_hotkey=self.legacy_reselect_hotkey,
+            callbacks={
+                "solve": self._on_global_hotkey,
+                "simplify": self._on_toggle_simplify_hotkey,
+                "border": self._on_cycle_border_hotkey,
+                "reselect": self._on_reselect_hotkey,
+            },
+            warn=print,
+        )
+        toggle_reselect_mode_expr = self._normalize_hotkey(
+            self.toggle_reselect_mode_hotkey
+        )
+        if toggle_reselect_mode_expr not in hotkey_map:
+            hotkey_map[toggle_reselect_mode_expr] = self._on_toggle_reselect_mode_hotkey
         else:
-            self.split_canvas.create_rectangle(0, 0, 60, 30, fill='gray', outline='black')
-            self.split_canvas.create_oval(0, 0, 30, 30, fill='white', outline='black')
+            print(
+                "警告: 重选模式切换快捷键重复"
+                f"({self.toggle_reselect_mode_hotkey})，已忽略该快捷键注册"
+            )
 
-    def toggle_split(self, event):
-        """切换左右分屏开关"""
-        self.split_state = not getattr(self, 'split_state', False)
-        self.draw_split()
-
-    def draw_confirm(self):
-        """绘制手动确认开关状态"""
         try:
-            self.confirm_canvas.delete('all')
-        except Exception:
-            return
-        
-        self.confirm_var.set('修改模式')
-
-        if self.confirm_state:
-            self.confirm_canvas.create_rectangle(0, 0, 60, 30, fill='green', outline='black')
-            self.confirm_canvas.create_oval(30, 0, 60, 30, fill='white', outline='black')
-            # self.confirm_var.set('On')
-        else:
-            self.confirm_canvas.create_rectangle(0, 0, 60, 30, fill='gray', outline='black')
-            self.confirm_canvas.create_oval(0, 0, 30, 30, fill='white', outline='black')
-            # self.confirm_var.set('Off')
-
-    def toggle_confirm(self, event):
-        """切换手动确认开关"""
-        self.confirm_state = not getattr(self, 'confirm_state', False)
-        self.draw_confirm()
-        # if turning off, hide any OK button and clear waiting flag
-        if not self.confirm_state:
-            try:
-                if hasattr(self, 'ok_btn'):
-                    try:
-                        self.ok_btn.place_forget()
-                    except Exception:
-                        pass
-                self.waiting_for_confirm = False
-            except Exception:
-                pass
-
-    def create_speed_slider(self, parent=None):
-        """创建OCR速度滑块，用于在速度和精度之间切换"""
-        if parent is None:
-            parent = self.root
-        
-        frame = tk.Frame(parent)
-        frame.pack(pady=6, anchor='w', padx=6, fill=tk.X)
-        
-        # 标签
-        tk.Label(frame, text="OCR速度:").pack(side=tk.LEFT)
-        
-        # 速度模式映射: 滑块值 -> 模式名
-        self._speed_modes_map = {0: 'fast', 1: 'balanced', 2: 'accurate'}
-        self._speed_labels = {0: '⚡极速', 1: '⚖️平衡', 2: '🎯精确'}
-        
-        # 当前速度值（记录上一次的值，避免重复触发）
-        self.speed_var = tk.IntVar(value=0)  # 默认极速模式
-        self._last_speed_value = 0
-        
-        # 速度显示标签
-        self.speed_display = tk.Label(frame, text=self._speed_labels[0], width=8)
-        self.speed_display.pack(side=tk.RIGHT, padx=(6, 0))
-        
-        # 滑块
-        self.speed_slider = ttk.Scale(
-            frame,
-            from_=0,
-            to=2,
-            orient=tk.HORIZONTAL,
-            variable=self.speed_var,
-            command=self._on_speed_change,
-            length=150
-        )
-        self.speed_slider.pack(side=tk.LEFT, padx=6, fill=tk.X, expand=True)
-        
-        # 保存frame
-        self._speed_frame = frame
-    
-    def _on_speed_change(self, value):
-        """速度滑块值改变时的回调"""
-        # 将浮点值四舍五入为整数
-        int_value = round(float(value))
-        
-        # 只有当值真正改变时才处理
-        if int_value == self._last_speed_value:
-            return
-        
-        self._last_speed_value = int_value
-        
-        # 更新滑块位置（吸附到整数位置）
-        self.speed_var.set(int_value)
-        
-        # 更新显示标签
-        self.speed_display.config(text=self._speed_labels.get(int_value, ''))
-        
-        # 更新OCR引擎的速度模式
-        mode = self._speed_modes_map.get(int_value, 'fast')
-        try:
-            self.ocr_engine.set_speed_mode(mode)
-            # 更新状态栏
-            mode_info = self.ocr_engine.get_speed_modes().get(mode, {})
-            self.status_var.set(f"OCR模式: {mode_info.get('name', mode)} - {mode_info.get('description', '')}")
+            self._hotkey_listener = pynput_keyboard.GlobalHotKeys(hotkey_map)
+            self._hotkey_listener.start()
         except Exception as e:
-            print(f"切换OCR速度模式失败: {e}")
+            print(
+                "注册全局快捷键失败("
+                f"解题={self.hotkey}, 简化={self.simplify_hotkey}, "
+                f"边框={self.border_cycle_hotkey}, 重选={self.reselect_hotkey}): {e}"
+            )
 
-    def draw_simplify(self):
-        """绘制简化模式开关状态"""
+    def _on_global_hotkey(self):
+        """全局快捷键回调（非主线程），转到 Tk 主线程执行。"""
         try:
-            self.simplify_canvas.delete('all')
+            self.root.after(0, lambda: self.solve(force=True))
         except Exception:
-            return
+            pass
 
-        self.simplify_var.set('简化模式')
+    def _on_toggle_simplify_hotkey(self):
+        """简化模式快捷键回调（非主线程），转到 Tk 主线程执行。"""
+        try:
+            self.root.after(0, self._toggle_simplify_from_hotkey)
+        except Exception:
+            pass
 
-        if self.simplify_state:
-            self.simplify_canvas.create_rectangle(0, 0, 60, 30, fill='green', outline='black')
-            self.simplify_canvas.create_oval(30, 0, 60, 30, fill='white', outline='black')
-            # self.simplify_var.set('On')
-        else:
-            self.simplify_canvas.create_rectangle(0, 0, 60, 30, fill='gray', outline='black')
-            self.simplify_canvas.create_oval(0, 0, 30, 30, fill='white', outline='black')
-            # self.simplify_var.set('Off')
-
-    def toggle_simplify(self, event):
-        """切换简化模式开关"""
-        self.simplify_state = not getattr(self, 'simplify_state', False)
+    def _toggle_simplify_from_hotkey(self):
+        self.simplify_state = not getattr(self, "simplify_state", False)
         self.draw_simplify()
-    
-    def draw_switch(self):
-        """绘制开关状态"""
-        self.switch_canvas.delete("all")
+        self.status_var.set(f"简化模式: {'开启' if self.simplify_state else '关闭'}")
 
-        self.switch_var.set("开始答题")
-        
-        if self.switch_state:
-            # 开状态 - 绿色
-            self.switch_canvas.create_rectangle(0, 0, 60, 30, fill='green', outline='black')# 绘制矩形作为开关背景
-            self.switch_canvas.create_oval(30, 0, 60, 30, fill='white', outline='black')# 绘制圆形作为开关按钮
-            # self.switch_var.set("On")
-            if hasattr(self, 'solve_btn'):
-                self.solve_btn.config(state='normal')# 启用Solve按钮
-        else:
-            # 关状态 - 灰色
-            self.switch_canvas.create_rectangle(0, 0, 60, 30, fill='gray', outline='black')
-            self.switch_canvas.create_oval(0, 0, 30, 30, fill='white', outline='black')
-            # self.switch_var.set("Off")
-            if hasattr(self, 'solve_btn'):
-                self.solve_btn.config(state='disabled')
-    
-    def toggle_switch(self, event):
-        """切换开关状态"""
-        self.switch_state = not self.switch_state
-        self.draw_switch()
-
-    def _toggle_controls(self):
-        """折叠/展开控件面板主体"""
-        if getattr(self, '_controls_expanded', True):
-            # 隐藏主体
-            try:
-                self.controls_body.pack_forget()
-            except Exception:
-                pass
-            self._toggle_btn.config(text='+')
-            self._controls_expanded = False
-        else:
-            # 展开主体
-            try:
-                self.controls_body.pack(fill=tk.X)
-            except Exception:
-                pass
-            self._toggle_btn.config(text='−')
-            self._controls_expanded = True
-
-    def _on_unmap(self, event):
-        """窗口最小化时取消置顶"""
+    def _on_cycle_border_hotkey(self):
+        """边框样式快捷键回调（非主线程），转到 Tk 主线程执行。"""
         try:
-            if self.root.state() == 'iconic':
-                self.root.attributes('-topmost', False)
+            self.root.after(0, self._cycle_border_style)
         except Exception:
             pass
 
-    def _on_map(self, event):
-        """窗口还原时再次置顶"""
+    def _cycle_border_style(self):
+        self._border_style_index = (self._border_style_index + 1) % len(
+            self._border_styles
+        )
+        style = self._current_border_style()
+        self.status_var.set(f"边框样式: {style['name']}")
+        selected_region = getattr(self.screenshot_manager, "selected_region", None)
+        if selected_region:
+            self._create_region_overlay(selected_region)
+
+    def _on_reselect_hotkey(self):
+        """重选区域快捷键回调（非主线程），转到 Tk 主线程执行。"""
         try:
-            if self.root.state() != 'iconic':
-                self.root.attributes('-topmost', True)
+            self.root.after(0, self._reselect_region_from_hotkey)
         except Exception:
             pass
-    
-    def select_region(self):
-        """选择识别区域"""
+
+    def _on_toggle_reselect_mode_hotkey(self):
+        """重选模式切换快捷键回调（非主线程），转到 Tk 主线程执行。"""
+        try:
+            self.root.after(0, self._toggle_reselect_mode_from_hotkey)
+        except Exception:
+            pass
+
+    def _toggle_reselect_mode_from_hotkey(self):
+        self.reselect_nofocus = not bool(self.reselect_nofocus)
+        try:
+            setattr(
+                self.config, "HOTKEY_RESELECT_REGION_NOFOCUS", self.reselect_nofocus
+            )
+        except Exception:
+            pass
+
+        # 切换模式时终止当前取点监听，避免中间态混淆。
+        self._stop_region_pick_listener()
+        mode_label = "无焦点双击取点" if self.reselect_nofocus else "有焦全屏双击取点"
+        self.status_var.set(f"重选模式: {mode_label}")
+        self._set_local_hint(f"重选模式已切换为：{mode_label}")
+
+    def _on_close(self):
+        """窗口关闭时释放资源。"""
+        self.shutdown()
+        try:
+            self.root.quit()
+        except Exception:
+            pass
+
+    def shutdown(self):
+        """释放全局热键与语音资源。"""
+        if self._closed:
+            return
+        self._closed = True
+
+        try:
+            if self._hotkey_listener:
+                self._hotkey_listener.stop()
+        except Exception:
+            pass
+
+        try:
+            if self.voice_output:
+                self.voice_output.shutdown()
+        except Exception:
+            pass
+        self._stop_region_pick_listener()
+
+    def _stop_region_pick_listener(self):
+        if self._region_picker:
+            try:
+                self._region_picker.stop()
+            except Exception:
+                pass
+        self._region_picker = None
+
+    def _apply_selected_region(self, region):
+        if not region:
+            return
+        self.screenshot_manager.set_region(region)
+        self.region_label.config(text=f"已选择区域: {region}")
+        self.solve_btn.config(state="normal" if self.switch_state else "disabled")
+        self._set_local_hint(f"已更新识别区域 {region}")
+        try:
+            self._create_region_overlay(region)
+            self.close_region_btn.config(state="normal")
+        except Exception:
+            pass
+
+    def _reselect_region_from_hotkey(self):
+        if self.reselect_nofocus and pynput_mouse is not None:
+            self._start_nofocus_region_pick()
+            return
+        if self.reselect_nofocus and pynput_mouse is None:
+            self.status_var.set("无焦点重选不可用，自动切换为有焦双击取点")
+            self._set_local_hint("未检测到鼠标监听能力，回退为有焦双击取点")
+        self.select_region(keep_focus=False)
+
+    def _start_nofocus_region_pick(self):
+        self._stop_region_pick_listener()
+        self.status_var.set(
+            "无焦点重选区域: 请依次点击左上角和右下角（可能触发网页点击）"
+        )
+        self._set_local_hint("无焦点取点中：先点左上角，再点右下角")
+
+        def on_first_point(point):
+            self.root.after(
+                0,
+                lambda p=point: self.status_var.set(
+                    f"无焦点重选区域: 第一取点 {p}，请点击右下角"
+                ),
+            )
+            self.root.after(
+                0, lambda p=point: self._set_local_hint(f"第一取点成功 {p}")
+            )
+
+        def on_region(region, p1, p2):
+            self.root.after(0, lambda r=region: self._apply_selected_region(r))
+            self.root.after(0, lambda: self.status_var.set("无焦点重选区域完成"))
+            self.root.after(
+                0,
+                lambda start=p1, end=p2: self._set_local_hint(
+                    f"双击取点完成 {start} -> {end}"
+                ),
+            )
+            self.root.after(0, self._stop_region_pick_listener)
+
+        def on_error(error):
+            error_text = str(error)
+            self.root.after(
+                0, lambda err=error_text: self.status_var.set(f"无焦点重选失败: {err}")
+            )
+            self.root.after(
+                0, lambda err=error_text: self._set_local_hint(f"无焦点重选失败: {err}")
+            )
+            self.root.after(0, self._stop_region_pick_listener)
+
+        try:
+            self._region_picker = NoFocusRegionPicker(
+                mouse_module=pynput_mouse,
+                on_first_point=on_first_point,
+                on_region=on_region,
+                on_error=on_error,
+            )
+            self._region_picker.start()
+        except Exception as e:
+            self.status_var.set(f"启动无焦点重选失败: {e}")
+            self._set_local_hint(f"启动无焦点重选失败: {e}")
+
+    def select_region(self, keep_focus=True):
+        """选择识别区域（有焦模式，会弹出全屏选择窗口）"""
         from gui.region_selector import RegionSelector
-        
-        def on_region_selected(region):
-            if region:
-                self.screenshot_manager.set_region(region)
-                self.region_label.config(text=f"已选择区域: {region}")
-                # 尝试捕获并显示选区预览
-                img = self.screenshot_manager.capture_region()
-                if img is not None:
-                    self.update_preview(img)
-                # enable solve when region selected
-                self.solve_btn.config(state='normal' if self.switch_state else 'disabled')
-                # 显示屏幕上的选区边框以便观察
-                try:
-                    self._create_region_overlay(region)
-                    # 启用关闭按钮
-                    self.close_region_btn.config(state='normal')
-                except Exception:
-                    pass
 
-        # 最小化主窗口临时（使用 iconify 而不是 withdraw 防止任务栏图标消失）
+        self._stop_region_pick_listener()
+
+        def on_region_selected(region):
+            self._apply_selected_region(region)
+
         try:
             self.root.iconify()
         except Exception:
-            # fallback to withdraw if iconify not available
             try:
                 self.root.withdraw()
             except Exception:
                 pass
 
-        selector = RegionSelector(on_region_selected)
+        selector_alpha = getattr(self.config, "REGION_SELECTOR_ALPHA", 0.3)
+        selector = RegionSelector(on_region_selected, overlay_alpha=selector_alpha)
         selector.start_selection()
 
-        # 重新显示主窗口并置顶
-        try:
-            self.root.deiconify()
-            self.root.lift()
-            self.root.focus_force()
-        except Exception:
-            pass
-    
+        if keep_focus:
+            try:
+                self.root.deiconify()
+                self.root.lift()
+                self.root.focus_force()
+            except Exception:
+                pass
+
     def create_result_area(self):
         """创建结果显示区域"""
         result_frame = tk.LabelFrame(self.root, text="AI回复")
         result_frame.pack(pady=10, padx=10, fill=tk.BOTH, expand=True)
-        
+
         self.result_text = scrolledtext.ScrolledText(
-            result_frame, 
-            wrap=tk.WORD,
-            height=10
+            result_frame, wrap=tk.WORD, height=10
         )
         self.result_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         # OK 按钮，用于在手动确认模式下把编辑后的 OCR 文本发送到 AI
-        self.ok_btn = tk.Button(result_frame, text='✔', bg='green', fg='white', command=self._on_confirm_send)
+        self.ok_btn = tk.Button(
+            result_frame,
+            text="✔",
+            bg="green",
+            fg="white",
+            command=self._on_confirm_send,
+        )
         # 隐藏，按需 place 到 result_text 的右下角
         try:
             self.ok_btn.place_forget()
         except Exception:
             pass
-    
-    def solve(self):
+
+    def solve(self, force=False):
         """执行OCR和AI处理"""
-        if not self.switch_state:
+        if not force and not self.switch_state:
             return
+
+        if self.waiting_for_confirm:
+            try:
+                self.status_var.set("请先确认当前OCR文本")
+            except Exception:
+                pass
+            return
+
+        if self.processing:
+            try:
+                self.status_var.set("正在处理上一题，请稍候...")
+            except Exception:
+                pass
+            return
+
+        self.processing = True
         # 每次solve前清空结果区域以保持简洁（若result_text不存在则忽略）
         try:
-            self.result_text.delete('1.0', tk.END)
+            self.result_text.delete("1.0", tk.END)
         except Exception:
             pass
 
@@ -497,20 +430,22 @@ class MainWindow:
         thread = threading.Thread(target=self._solve_thread)
         thread.daemon = True
         thread.start()
-    
+
     def _solve_thread(self):
         """处理线程"""
-        self.status_var.set("正在处理...")
-        
+        self.root.after(0, lambda: self.status_var.set("正在处理..."))
+
         try:
             # 截图
             screenshot = self.screenshot_manager.capture_region()
             if screenshot is None:
-                self.result_text.insert(tk.END, "错误: 未选择区域\n")
+                self.root.after(
+                    0, lambda: self.result_text.insert(tk.END, "错误: 未选择区域\n")
+                )
                 return
-            
+
             # OCR识别（支持左右分屏模式）
-            if getattr(self, 'split_state', False):
+            if getattr(self, "split_state", False):
                 try:
                     ocr_text = self.ocr_engine.extract_text_split(screenshot)
                 except Exception:
@@ -519,31 +454,61 @@ class MainWindow:
             else:
                 ocr_text = self.ocr_engine.extract_text(screenshot)
             if not ocr_text:
-                self.root.after(0, lambda: self.result_text.insert(tk.END, "OCR未识别到文字\n"))
+                self.root.after(
+                    0, lambda: self.result_text.insert(tk.END, "OCR未识别到文字\n")
+                )
+                return
+
+            ocr_text_path = self._persist_ocr_text(ocr_text)
+            ocr_text_for_ui = self._load_ocr_text(ocr_text_path, fallback=ocr_text)
+            ai_prompt = self._build_ai_prompt_from_ocr(
+                self._load_ocr_text(ocr_text_path, fallback=ocr_text)
+            )
+            if not ai_prompt:
+                self.root.after(
+                    0, lambda: self.result_text.insert(tk.END, "OCR文本清洗后为空\n")
+                )
                 return
 
             # 若开启debug则输出OCR原文，默认不打印到结果区域
             if self.debug:
-                self.root.after(0, lambda: self.result_text.insert(tk.END, f"识别文字: {ocr_text}\n\n正在调用AI...\n"))
+                self.root.after(
+                    0,
+                    lambda: self.result_text.insert(
+                        tk.END,
+                        f"识别文字: {ocr_text_for_ui}\n"
+                        f"OCR临时文件: {ocr_text_path}\n\n正在调用AI...\n",
+                    ),
+                )
             else:
                 # 仍在结果区显示正在调用AI的状态行
-                self.root.after(0, lambda: self.result_text.insert(tk.END, "正在调用AI...\n"))
+                self.root.after(
+                    0, lambda: self.result_text.insert(tk.END, "正在调用AI...\n")
+                )
 
             # 如果简化模式开启，传入重要的 system prompt 指示 AI 只返回简短答案
             system_prompt = None
-            if getattr(self, 'simplify_state', False):
+            if getattr(self, "simplify_state", False):
                 system_prompt = "快速回答下面问题，不需要任何解释"
             # 如果手动确认模式开启，则将OCR结果放入可编辑的结果框并显示OK按钮，等待用户确认后再发送
-            if getattr(self, 'confirm_state', False):
+            if getattr(self, "confirm_state", False):
+
                 def prepare_for_confirm():
                     try:
-                        self.result_text.delete('1.0', tk.END)
+                        self.result_text.delete("1.0", tk.END)
                     except Exception:
                         pass
-                    self.result_text.insert(tk.END, ocr_text)
+                    self.result_text.insert(tk.END, ocr_text_for_ui)
                     # place OK 按钮在结果框右下角
                     try:
-                        self.ok_btn.place(in_=self.result_text, relx=1.0, rely=1.0, x=-10, y=-10, anchor='se')
+                        self.ok_btn.place(
+                            in_=self.result_text,
+                            relx=1.0,
+                            rely=1.0,
+                            x=-10,
+                            y=-10,
+                            anchor="se",
+                        )
                         self.ok_btn.lift()
                     except Exception:
                         pass
@@ -553,29 +518,41 @@ class MainWindow:
                 self.root.after(0, prepare_for_confirm)
                 return
 
-            ai_response = self.ai_client.generate_response(ocr_text, system_prompt=system_prompt)
+            ai_response = self.ai_client.generate_response(
+                ai_prompt, system_prompt=system_prompt
+            )
 
             # 更新界面
-            self.root.after(0, lambda: self.display_result(ocr_text, ai_response))
-            
+            self.root.after(0, lambda: self.display_result(ai_prompt, ai_response))
+
         except Exception as e:
-            self.root.after(0, lambda: self.result_text.insert(tk.END, f"处理错误: {str(e)}\n"))
+            self.root.after(
+                0, lambda: self.result_text.insert(tk.END, f"处理错误: {str(e)}\n")
+            )
         finally:
-            self.root.after(0, lambda: self.status_var.set("就绪"))
-    
+            self.root.after(0, self._finish_processing)
+
+    def _finish_processing(self):
+        """线程结束后的统一收尾。"""
+        self.processing = False
+        if not self.waiting_for_confirm:
+            self.status_var.set(self._ready_status())
+
     def display_result(self, ocr_text, ai_response):
         """显示结果"""
-        self.result_text.insert(tk.END, f"\n\nAI回复:\n{ai_response}\n{'='*50}\n")
+        self.result_text.insert(tk.END, f"\n\nAI回复:\n{ai_response}\n{'=' * 50}\n")
         self.result_text.see(tk.END)
+        if self.voice_enabled and self.voice_output:
+            self.voice_output.speak(ai_response)
 
     def _on_confirm_send(self):
         """当用户点击 OK 时，将编辑后的文本发送给 AI 并显示回复"""
-        if not getattr(self, 'waiting_for_confirm', False):
+        if not getattr(self, "waiting_for_confirm", False):
             return
 
         prompt = None
         try:
-            prompt = self.result_text.get('1.0', tk.END).strip()
+            prompt = self.result_text.get("1.0", tk.END).strip()
         except Exception:
             prompt = None
 
@@ -593,6 +570,7 @@ class MainWindow:
         except Exception:
             pass
         self.waiting_for_confirm = False
+        self.processing = True
 
         # start thread to call AI so UI doesn't block
         thread = threading.Thread(target=self._confirm_send_thread, args=(prompt,))
@@ -602,114 +580,46 @@ class MainWindow:
     def _confirm_send_thread(self, prompt):
         """线程：调用AI并将结果回填界面"""
         try:
-            self.status_var.set("正在调用AI...")
+            self.root.after(0, lambda: self.status_var.set("正在调用AI..."))
             system_prompt = None
-            if getattr(self, 'simplify_state', False):
+            if getattr(self, "simplify_state", False):
                 system_prompt = "快速回答下面问题，不需要任何解释"
 
-            ai_response = self.ai_client.generate_response(prompt, system_prompt=system_prompt)
+            ai_response = self.ai_client.generate_response(
+                prompt, system_prompt=system_prompt
+            )
             self.root.after(0, lambda: self.display_result(prompt, ai_response))
         except Exception as e:
-            self.root.after(0, lambda: self.result_text.insert(tk.END, f"处理错误: {str(e)}\n"))
+            self.root.after(
+                0, lambda: self.result_text.insert(tk.END, f"处理错误: {str(e)}\n")
+            )
         finally:
-            self.root.after(0, lambda: self.status_var.set("就绪"))
+            self.root.after(0, self._finish_processing)
 
     def update_preview(self, image_array):
-        """在preview_canvas中显示所选区域的缩略图，并绘制边框以便观察"""
-        try:
-            if not hasattr(image_array, 'shape'):
-                return
-            # 转为PIL Image
-            pil = Image.fromarray(image_array)
-            # 缩放以适配canvas
-            canvas_w = int(self.preview_canvas['width'])
-            canvas_h = int(self.preview_canvas['height'])
-            pil.thumbnail((canvas_w, canvas_h), Image.LANCZOS)
-            self._preview_photo = ImageTk.PhotoImage(pil)
-            self.preview_canvas.delete('all')
-            self.preview_canvas.create_image(canvas_w//2, canvas_h//2, image=self._preview_photo)
-            # 绘制红色边框以示意
-            self.preview_canvas.create_rectangle(2, 2, canvas_w-2, canvas_h-2, outline='red', width=2)
-            # 若开启左右分屏，绘制与边框相同样式的中线
-            try:
-                if getattr(self, 'split_state', False):
-                    mid_x = canvas_w // 2
-                    # draw center vertical line matching border color/width
-                    self.preview_canvas.create_line(mid_x, 2, mid_x, canvas_h-2, fill='red', width=2)
-            except Exception:
-                pass
-        except Exception as e:
-            print('update_preview 错误:', e)
-    
+        """选区预览功能已移除。"""
+        return
+
     def _create_region_overlay(self, region):
         """在屏幕上创建一个无窗口装饰的透明覆盖，仅显示选区边框，直到用户点击关闭。"""
-        # 清除已有覆盖
-        try:
-            if hasattr(self, 'region_overlay') and self.region_overlay:
-                try:
-                    self.region_overlay.destroy()
-                except Exception:
-                    pass
-                self.region_overlay = None
-        except Exception:
-            self.region_overlay = None
+        self.region_overlay = destroy_region_overlay(self.region_overlay)
 
         if not region:
             return
 
-        x1, y1, x2, y2 = region
-        x1, x2 = int(min(x1, x2)), int(max(x1, x2))
-        y1, y2 = int(min(y1, y2)), int(max(y1, y2))
-        w = max(1, x2 - x1)
-        h = max(1, y2 - y1)
-
-        # 创建覆层窗口
-        overlay = tk.Toplevel(self.root)
-        overlay.overrideredirect(True)
-        try:
-            overlay.attributes('-topmost', True)
-        except Exception:
-            pass
-
-        # Try to make the background transparent on Windows by using a transparentcolor key
-        transparent_color = 'white'
-        try:
-            overlay.config(bg=transparent_color)
-            # set geometry to match region
-            overlay.geometry(f"{w}x{h}+{x1}+{y1}")
-            # Make the chosen bg color transparent (works on Windows)
-            overlay.wm_attributes('-transparentcolor', transparent_color)
-        except Exception:
-            # fallback: still set geometry
-            overlay.geometry(f"{w}x{h}+{x1}+{y1}")
-
-        canvas = tk.Canvas(overlay, width=w, height=h, highlightthickness=0, bg=transparent_color)
-        canvas.pack(fill=tk.BOTH, expand=True)
-        # Draw a red border inside the overlay
-        canvas.create_rectangle(1, 1, w-2, h-2, outline='red', width=3)
-
-        # If split mode is active, draw a center vertical line matching the border
-        try:
-            if getattr(self, 'split_state', False):
-                cx = w // 2
-                canvas.create_line(cx, 1, cx, h-1, fill='red', width=3)
-        except Exception:
-            pass
-
-        # keep reference
-        self.region_overlay = overlay
+        border_style = self._current_border_style()
+        self.region_overlay = create_region_overlay(
+            root=self.root,
+            region=region,
+            border_style=border_style,
+            border_width=self._border_line_width,
+            split_state=getattr(self, "split_state", False),
+        )
 
     def close_region(self):
         """关闭用于观察的选区边框并清除选区，要求重新选择才能再次OCR"""
-        try:
-            if hasattr(self, 'region_overlay') and self.region_overlay:
-                try:
-                    self.region_overlay.destroy()
-                except Exception:
-                    pass
-                self.region_overlay = None
-        except Exception:
-            pass
+        self._stop_region_pick_listener()
+        self.region_overlay = destroy_region_overlay(self.region_overlay)
 
         # 清除选区
         try:
@@ -720,12 +630,14 @@ class MainWindow:
         # 更新界面元素
         try:
             self.region_label.config(text="未选择区域")
-            self.preview_canvas.delete('all')
-            self.solve_btn.config(state='disabled')
-            self.close_region_btn.config(state='disabled')
+            self.solve_btn.config(state="disabled")
+            self.close_region_btn.config(state="disabled")
         except Exception:
             pass
-    
+
     def run(self):
         """运行主循环"""
-        self.root.mainloop()
+        try:
+            self.root.mainloop()
+        finally:
+            self.shutdown()

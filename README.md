@@ -1,64 +1,145 @@
-### AK_Subject_One
-- 该工具使用 **PaddleOCR** 进行OCR识别，相比Tesseract具有更高的中文识别准确率
-- PaddleOCR模型会自动下载，之后支持**完全离线**使用
-- 本工具用于对截图进行OCR并将OCR结果传输给大模型
-- 默认模型供应商为Ollama，默认模型为qwen2.5-coder:7b，需要确保安装了ollama且有该模型
-- 可自行配置所需大模型供应商，自带千问与deepseek相关API设置，配置后无需安装ollama
-- 功能：
-    - 开始答题：solve开始答题
-    - 简化模式：只输出答案
-    - 左右分屏：进行分屏OCR
-    - 修改模式：对OCR结果进行修改
-    - **OCR速度调节**：三档可调（极速/平衡/精确）
-- OCRdebug功能
-- 非必要组件折叠功能
+﻿# AK_Subject_One
 
-#### Install
-```text
+当前版本：`v4.1`
+
+AK_Subject_One 是一个“截图 -> OCR -> AI 解题”的桌面工具，目标是在尽量不打断当前操作的前提下，快速完成识别与答题。
+
+## 功能总览
+
+- 完整链路：区域截图 -> OCR 识别 -> AI 解题 -> 结果展示。
+- 全局快捷键：
+  - `Shift+L`：无焦点触发解题链路。
+  - `Shift+K`：切换简化模式。
+  - `Shift+J`：切换已选区域边框样式（红/透明/黑/浅白）。
+  - `Shift+H`：重选识别区域。
+  - `Ctrl+Shift+H`：热切换重选模式（无焦点双击取点 <-> 有焦全屏双击取点）。
+- 无焦点重选：通过全局鼠标监听双击取点（左上角 -> 右下角）。
+- 有焦重选：全屏双击取点，并支持背景透明度配置。
+- 模式开关：
+  - 开始答题开关（总开关）
+  - 简化模式（仅输出简短答案）
+  - 左右分屏 OCR
+  - 修改模式（OCR 文本先人工确认再发送）
+- OCR 速度调节：`fast / balanced / accurate`。
+- 语音播报：`VOICE=True` 时播报 AI 回复。
+- OCR 文本分流：OCR 原文落盘缓存，UI 显示原文，AI 使用清洗后的文本。
+- 工具面板折叠：减少 UI 占用。
+
+## v4.1 重要更新
+
+1. 新增配置项 `REGION_SELECTOR_ALPHA`。
+- 用于调整“有焦全屏双击取点”时背景透明度。
+- 支持范围 `0.05 ~ 1.0`，超界或非法值会自动钳制/回退。
+
+2. 有焦取点流程支持配置透传。
+- `MainWindow.select_region()` 从配置读取透明度并传给 `RegionSelector`。
+- `RegionSelector` 不再写死透明度常量。
+
+3. 文档升级与结构梳理。
+- 版本升级到 `v4.1`。
+- README 增补目录与关键文件职责说明。
+
+## 安装与运行
+
+```bash
 git clone https://github.com/micr0softDrestlife/AK_Subject_One.git
-
+cd AK_Subject_One
 pip install -r requirements.txt
-
 python main.py
 ```
 
-#### PaddleOCR 离线部署说明
-首次运行时，PaddleOCR会自动下载模型文件到 `~/.paddleocr/` 目录：
-- 检测模型 (det)
-- 识别模型 (rec)  
-- 方向分类模型 (cls)
+## 配置说明
 
-#### Use
-- 在setting.py文件中配置相关大模型供应商的API_KEY即可
+配置文件：`config/settings.py`
 
-#### 项目结构
-```bash
-ocr_ai_tool/
-├── main.py              # 主程序入口
-├── gui/
-│   ├── tray_icon.py     # 系统托盘图标
-│   ├── main_window.py   # 主浮动窗口
-│   └── region_selector.py # 区域选择器
-├── core/
-│   ├── ocr_engine.py    # OCR识别模块
-│   ├── ai_client.py     # Ollama API客户端
-│   └── screenshot.py    # 截图功能
-├── config/
-│   └── settings.py      # 配置文件
+### 1) 快捷键相关
+
+- `HOTKEY_SOLVE = "shift+l"`
+- `HOTKEY_TOGGLE_SIMPLIFY = "shift+k"`
+- `HOTKEY_CYCLE_BORDER_STYLE = "shift+j"`
+- `HOTKEY_RESELECT_REGION = "shift+h"`
+- `HOTKEY_TOGGLE_RESELECT_MODE = "ctrl+shift+h"`
+- `HOTKEY_RESELECT_REGION_NOFOCUS = True`
+
+### 2) UI 相关
+
+- `WINDOW_WIDTH / WINDOW_HEIGHT / WINDOW_ALPHA`
+- `REGION_SELECTOR_ALPHA`：有焦全屏双击取点背景透明度（`0.05 ~ 1.0`）
+
+### 3) OCR 相关
+
+- `PADDLEOCR_LANG`
+- `PADDLEOCR_SPEED_MODE = "fast" | "balanced" | "accurate"`
+- `PADDLEOCR_MODEL_DIR`
+
+### 4) 语音与调试
+
+- `VOICE = True | False`
+- `DEBUG = True | False`
+
+### 5) AI 提供方
+
+- `AI_PROVIDER = "ollama" | "qw" | "ds" | "ot" | ...`
+- 各 provider 对应的 URL / KEY / MODEL 参数在 `AppConfig` 中配置。
+
+## PaddleOCR 离线说明
+
+首次运行时，PaddleOCR 会自动下载模型到本机缓存目录（如 `~/.paddleocr/`），后续可离线使用。
+
+## 项目结构（含目录/文件功能）
+
+```text
+AK_Subject_One/
+├── main.py  （程序入口与组件装配（配置/OCR/AI/截图/GUI/托盘））
+├── requirements.txt
+├── README.md
+├── config/ （集中管理应用配置）
+│   └── settings.py  （集中定义 provider、OCR、UI、热键、语音参数）
+├── core/   （OCR、AI、截图、语音等核心能力）
+│   ├── ai_client.py  （AI 客户端工厂与多 provider 适配）
+│   ├── ocr_engine.py  （PaddleOCR 初始化、速度模式切换、文本提取/分屏提取）
+│   ├── screenshot.py  （选区归一化与区域截图）
+│   └── voice.py  （异步语音播报（Windows 优先 `System.Speech`，失败回退 `pyttsx3`））
+├── gui/    （主窗口、布局、事件、热键与选区工具）
+│   ├── main_window.py  （主流程编排（截图 -> OCR -> AI）、全局热键回调、状态与线程协调）
+│   ├── window_layout.py  （窗口布局构建器）
+│   ├── window_events.py  （窗口事件绑定与置顶状态管理）
+│   ├── panel_controls.py  （面板控件创建与开关绘制/切换逻辑）
+│   ├── hotkey_utils.py  （热键规范化与映射构建）
+│   ├── ocr_text_pipeline.py  （OCR 文本缓存、读取与 AI 提示词清洗）
+│   ├── region_tools.py  （无焦点双击取点与选区边框覆盖工具）
+│   ├── region_selector.py  （有焦全屏双击取点选择器（支持背景透明度配置））
+│   └── tray_icon.py  （系统托盘菜单与显示/退出动作）
+└── artifacts/ （运行时产物（如 OCR 缓存文本））
+    └── ocr_cache/
 ```
 
-#### v3
-- **重大更新：从Tesseract迁移到PaddleOCR**
-- 中文OCR识别准确率显著提升
-- 无需安装Tesseract二进制文件
-- 支持离线使用（模型自动缓存）
-- **新增OCR速度滑块**：
-  - ⚡极速模式：约0.5秒（PP-OCRv4 mobile）
-  - ⚖️平衡模式：约1秒
-  - 🎯精确模式：约8秒（PP-OCRv5 server，最高精度）
 
-#### v2
-- 完善了部分模型供应商
-- 增加了修改模式
-- 进行了页面美化
-- 打包了相关的python库依赖
+## 历史版本
+
+### v4.1
+
+- 增加 `REGION_SELECTOR_ALPHA` 配置项。
+- 有焦全屏双击取点背景透明度支持配置与范围校验。
+
+### v4
+
+- 快捷键默认迁移到 `Shift` 体系。
+- 增加无焦点双击取点与重选模式热切换。
+- 新增边框样式循环切换与透明边框模式。
+  - 边框当前前覆盖层是 `topmost` 且 `-disabled`，通常不抢焦点，但不同系统/浏览器下不能 100% 保证。
+  - 若要降低风险，建议切换到透明边框样式，此时会直接不创建覆盖层。
+- OCR 文本缓存分流（UI 原文 / AI 清洗文本）。
+- 语音播报更新与稳定性修复。
+- GUI 拆分为布局/事件/面板与工具模块。
+
+### v3
+
+- OCR 从 Tesseract 迁移至 PaddleOCR。
+- 中文识别准确率提升，支持模型缓存离线使用。
+- 引入 OCR 速度三档。
+
+### v2
+
+- 增加更多模型提供方适配。
+- 增加修改模式与界面优化。

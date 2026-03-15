@@ -1,0 +1,15 @@
+单选题
+烽/cc8c2d50
+陈泽烽/cc8c2d5
+陈泽烽/cc8c2d50
+88.分析恶意代码的字符串特征，下列字符串组合最可能属于挖矿木马的是？
+".locked"、"ransom note.txt"、"AES-256"
+D0
+d5d7fe5h8cu
+"stratum+tcp://"、"miner"、 "hash rate"
+陈泽烽/cc8c2d5d7te5b8cu-
+陈泽烽/cc8c2d5d7te5h8
+"Cookie"、"POST"、"malicious.com"
+"net user"、"RegSetValueEx"、"HKLM\SOFTWARE\Run"
+7fe5b8cu
+47fe5b8

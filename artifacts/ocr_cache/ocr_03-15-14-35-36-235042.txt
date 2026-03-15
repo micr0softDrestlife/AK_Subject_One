@@ -1,0 +1,11 @@
+单选题
+陈泽烽
+29.Windows系统中，用于修改文件权限的命令是？
+chmod
+icacls
+/cc8c2d5d7fe5b8cu
+乐户
+陈泽烽
+chown
+attrib
+7e5b8cu~

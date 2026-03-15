@@ -1,0 +1,9 @@
+单选题
+55.渗透测试中，使用"meterpreter"进行提权时，常用的命令是？
+getuid
+陈泽烽/cc8c2d5
+getsystem
+ipconfig
+shell
+1cc8c2d5d7fe5b8cy-
+陈泽烽/cc8c2d5

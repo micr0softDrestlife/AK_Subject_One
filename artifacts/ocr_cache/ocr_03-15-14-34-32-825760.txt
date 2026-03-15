@@ -1,0 +1,8 @@
+单选题
+烽/cc8c2d5d
+陈泽灯
+22.Linux系统中，用于查看当前登录用户信息的命令是？
+whoami
+who
+ps
+netstat

@@ -1,0 +1,9 @@
+单选题
+65.下列哪种场景最容易出现SpringBoot目录穿越？
+接口直接拼接用户输入到ResourceUtils.getFileO
+/cc8c2d5
+使用@RequestBody接收JSON
+开启CORS但未校验Origin
+8c2d5d7fe5b
+未过滤XSS输出
+陈泽烽/cc8c2d5

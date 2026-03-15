@@ -1,0 +1,10 @@
+单选题
+93.下列关于WAF的描述，错误的是？
+WAF主要针对HTTP/HTTPS协议的Web应用，防御SQL注入、XSS等Web漏洞
+2d5d7fe5l
+基于特征的WAF可防御已知漏洞，基于行为的WAF可防御未知Oday漏洞
+陈泽烽/cc8c2d5d7fe5b80
+WAF可部署在Web服务器前端，也可部署在反向代理与服务器之间
+WAF能完全防御DDoS攻击，无需配合抗DDoS设备使用
+2d5d7fe5b8cu
+2d5d7fe5b89

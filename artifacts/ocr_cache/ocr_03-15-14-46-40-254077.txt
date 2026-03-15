@@ -1,0 +1,8 @@
+单选题
+77.Windows域环境中，黄金票据伪造的是？
+TGT
+陈泽烽/cc8c2d5
+TGS
+NTML Hash
+AES256密钥
+陈泽烽/cc8c2d5

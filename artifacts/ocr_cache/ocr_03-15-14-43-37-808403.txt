@@ -1,0 +1,9 @@
+单选题
+59.Linux系统中，用于修改用户密码的命令是？
+passwd
+陈泽烽/cc8c2d5
+password
+chpasswd
+setpass
+c8c2d5d7fe5b8cu
+陈泽烽/cc8c2d5

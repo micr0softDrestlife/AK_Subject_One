@@ -1,0 +1,9 @@
+单选题
+68.下列哪种配置最能有效防御OAuth授权码劫持？
+只使用code模式
+陈泽烽/cc8c2d5
+启用PKCE
+延长token有效期
+/cc8c2d5d7fe5b8cu-
+关闭HTTPS
+陈泽烽/cc8c2d5

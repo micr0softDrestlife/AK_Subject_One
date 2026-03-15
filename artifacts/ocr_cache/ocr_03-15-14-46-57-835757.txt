@@ -1,0 +1,9 @@
+单选题
+79.NTLMRelay攻击的核心前提是？
+目标开启SMBsigning强制
+陈泽烽/cc8c2d5
+目标未强制SMB签名
+获得域管理员密码
+fe5b8c0
+陈泽烽/cc8c2d5
+控制DNS

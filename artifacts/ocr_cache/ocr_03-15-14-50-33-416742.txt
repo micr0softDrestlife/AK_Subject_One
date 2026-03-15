@@ -1,0 +1,12 @@
+单选题
+96.某日志审计系统采集到如下防火墙日志：Jan1014:30:00firewall:%ASA-6-106015:DenyTCP（noconnection）from
+203.0.113.100:445to192.168.1.10:80flagsSYNoninterfaceoutside。下列对该日志的分析，正确的是？
+该日志表示允许外部IP通过445端口访问内网IP的80端口
+c2d5d7fe5b8cu-
+东泽烽/cc8c2d5d7fe5b8
+该日志表示拒绝外部IP发起的TCP连接，原因是未建立合法连接
+该日志表示内网IP主动向外部IP发起TCP连接，被防火墙拒绝
+z
+该日志是正常访问日志，无安全风险
+陈泽烽/cc8c2d5d7fe5b8cc
+陈泽烽/cc8c2d5d7fe5b8
