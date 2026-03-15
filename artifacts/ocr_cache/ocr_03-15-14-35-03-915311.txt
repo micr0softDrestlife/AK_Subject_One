@@ -1,8 +1,0 @@
-单选题
-陈泽烽
-25.Windows系统中，用于查看系统进程的命令是？
-tasklist
-陈泽烽
-ping
-dir
-fe5b8cu-

@@ -1,9 +1,0 @@
-单选题
-78.下列哪种不属于WindowsLateralMovement常用手段？
-WMI
-陈泽烽/cc8c2d5
-SMB/psexec
-RDP
-烽/cc8c2d5d7fe5b8cu
-陈泽烽/cc8c2d5
-ARP欺骗

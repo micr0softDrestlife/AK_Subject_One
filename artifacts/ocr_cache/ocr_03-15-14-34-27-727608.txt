@@ -1,9 +1,0 @@
-单选题
-烽/cc8c2d5d
-陈泽
-21.下列操作系统中，不属于服务器操作系统的是？
-WindowsServer2019
-CentOS8
-c2d5d7fe5b8tu
-Windows11
-UbuntuServer22.04

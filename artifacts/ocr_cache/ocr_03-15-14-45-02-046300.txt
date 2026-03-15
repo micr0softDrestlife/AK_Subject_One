@@ -1,9 +1,0 @@
-单选题
-67.下列哪种不是SSRF常见利用点？
-访问内网Redis
-陈泽烽/cc8c2d5
-读取file:///etc/passwd
-爆破内网端口
-8c2d5d7fe5b8cu
-执行系统命令
-陈泽烽/cc8c2d5

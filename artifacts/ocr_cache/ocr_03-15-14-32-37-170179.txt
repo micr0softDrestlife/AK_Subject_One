@@ -1,9 +1,0 @@
-单选题
-烽/cc8c2d5d
-7.Linux中，修改文件权限为仅所有者可读写的命令是？
-chmod 777
-chmod 600
-烽/cc8c2d5d7fe5b8cu
-chmod 644
-陈泽
-chmod755

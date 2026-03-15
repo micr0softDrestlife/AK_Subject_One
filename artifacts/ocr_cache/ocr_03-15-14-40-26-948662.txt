@@ -1,8 +1,0 @@
-54.Windows系统中，“Everyone"组的默认权限是？
-完全控制
-陈泽烽/cc8c2d5
-读取和执行
-仅读取
-无权限
-c8c2d5d7fe5b8cy-
-泽烽/cc8c2d

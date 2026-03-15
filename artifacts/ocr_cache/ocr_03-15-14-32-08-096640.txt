@@ -1,8 +1,0 @@
-单选题
-圣烽/cc8c2d5d
-5.Windows系统中，用于查看当前开放端口的命令是？
-ipconfig
-tasklist
-netstat
-陈泽
-tracert
